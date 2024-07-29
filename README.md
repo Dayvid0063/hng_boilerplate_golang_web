@@ -141,7 +141,7 @@ Note: .gitignore my inventory.cfg file.
      ```
    - Ensure the application is running on `127.0.0.1:3000`:
      ```sh
-     curl -I http://127.0.0.1:3000
+     sudo lsof -i :3000
      ```
 
 6. **Nginx Configuration**
