@@ -1,0 +1,205 @@
+- name: Install and Configure PostgreSQL
+  hosts: hng
+  become: yes
+
+  vars:
+    repo_dir: /opt/stage_5b
+    repo_url: 'https://github.com/hngprojects/hng_boilerplate_golang_web.git'
+    expected_owner: hng
+    expected_group: hng
+
+  tasks:
+    - name: Ensure required system packages are installed
+      apt:
+        name:
+          - git
+          - curl
+          - wget
+        state: present
+
+    - name: Install PostgreSQL
+      apt:
+        name: postgresql
+        state: present
+
+    - name: Start and enable PostgreSQL service
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Create PostgreSQL database and user
+      shell: |
+        sudo -u postgres psql -c "CREATE DATABASE hngdevops;"
+        sudo -u postgres psql -c "CREATE USER dayvid WITH PASSWORD 'password123';"
+        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE hngdevops TO dayvid;"
+
+    - name: Ensure /var/secrets directory exists
+      file:
+        path: /var/secrets
+        state: directory
+        mode: '0700'
+
+    - name: Save PostgreSQL credentials to /var/secrets/pg_pw.txt
+      copy:
+        dest: /var/secrets/pg_pw.txt
+        content: |
+          USERNAME: dayvid
+          PASSWORD: password123
+
+    - name: Create hng user
+      user:
+        name: hng
+        state: present
+        groups: sudo
+        shell: /bin/bash
+        home: /home/hng
+
+    - name: Ensure /opt/stage_5b directory exists
+      file:
+        path: "{{ repo_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Add /opt/stage_5b as a safe directory for Git
+      shell: git config --global --add safe.directory {{ repo_dir }}
+
+    - name: Clone the boilerplate repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ repo_dir }}"
+        version: devops
+        single_branch: yes
+        update: no
+
+    - name: Check current ownership of the cloned directory
+      command: stat -c '%U:%G' {{ repo_dir }}
+      register: current_owner
+      changed_when: false
+
+    - name: Change ownership of the cloned directory to hng user
+      file:
+        path: "{{ repo_dir }}"
+        state: directory
+        owner: "{{ expected_owner }}"
+        group: "{{ expected_group }}"
+        recurse: yes
+      when: current_owner.stdout != expected_owner + ':' + expected_group
+
+    - name: Set up application environment variables
+      copy:
+        dest: "{{ repo_dir }}/app.env"
+        content: |
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_CONNECTION=pgsql
+          TIMEZONE=Africa/Lagos
+          USERNAME=dayvid
+          PASSWORD=password123
+          DB_NAME=hngdevops
+          SSLMODE=disable
+          MIGRATE=false
+          SERVER_PORT=3000
+
+    - name: Install Go
+      shell: |
+        wget https://golang.org/dl/go1.19.6.linux-amd64.tar.gz
+        sudo tar -C /usr/local -xzf go1.19.6.linux-amd64.tar.gz
+        echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
+      args:
+        creates: /usr/local/go/bin/go
+
+    - name: Set up Go environment variables for hng user
+      lineinfile:
+        dest: /home/hng/.profile
+        line: 'export PATH=$PATH:/usr/local/go/bin'
+
+    - name: Create log directory for the application
+      file:
+        path: /var/log/stage_5b
+        state: directory
+        owner: hng
+        group: hng
+        mode: '0755'
+
+    - name: Build the application
+      shell: |
+        cd {{ repo_dir }}
+        sudo -u hng /usr/local/go/bin/go build -o app main.go
+      become: yes
+      become_user: hng
+      register: build_result
+      changed_when: build_result.rc == 0
+
+    - name: Run the application
+      shell: |
+        cd {{ repo_dir }}
+        sudo -u hng nohup ./app > /var/log/stage_5b/out.log 2> /var/log/stage_5b/error.log &
+      become: yes
+      become_user: hng
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Configure Nginx to reverse proxy to the application
+      copy:
+        dest: /etc/nginx/sites-available/stage_5b
+        content: |
+          server {
+              listen 80;
+              server_name _;
+
+              location / {
+                  proxy_pass http://127.0.0.1:3000;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+
+    - name: Enable Nginx configuration
+      file:
+        src: /etc/nginx/sites-available/stage_5b
+        dest: /etc/nginx/sites-enabled/stage_5b
+        state: link
+
+    - name: Remove default Nginx configuration
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Restart Nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+    - name: Ensure log files are owned by the hng user
+      file:
+        path: /var/log/stage_5b
+        state: directory
+        owner: hng
+        group: hng
+        mode: '0755'
+      notify:
+        - restart nginx
+
+    - name: Check if the application is running
+      shell: |
+        pgrep -f "./app"
+      register: app_status
+      ignore_errors: yes
+      become: yes
+      become_user: hng
+
+    - name: Print application running status
+      debug:
+        msg: "Application is running on http://127.0.0.1:3000"
+      when: app_status.rc == 0
+
+    - name: Print application failed to start
+      debug:
+        msg: "Application failed to start"
+      when: app_status.rc != 0

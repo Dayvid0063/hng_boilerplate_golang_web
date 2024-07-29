@@ -31,3 +31,5 @@ tmp/
 
 
 app.env 
+
+ansible-book/inventory.cfg
