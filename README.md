@@ -77,8 +77,15 @@ ansible-playbook main.yaml -b
 ```
 
 Ensure the inventory.cfg file is correctly configured with the host `hng` and your host IP address.
+
 Ensure the main.yaml, inventory.cfg and ansible.cfg files are in the same directory to run the command.
 
+Example:
+git clone https://github.com/Dayvid0063/hng_boilerplate_golang_web.git
+
+cd ansible-book
+
+Run the Ansible playbook command
 
 Note: .gitignore my inventory.cfg file.
 
