@@ -192,7 +192,7 @@
       register: app_status
       ignore_errors: yes
       become: yes
-      become_user: hng
+      become_user: true
 
     - name: Print application running status
       debug:
