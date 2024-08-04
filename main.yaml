@@ -127,7 +127,7 @@
         cd {{ repo_dir }}
         sudo -u hng /usr/local/go/bin/go build -o app main.go
       become: yes
-      become_user: hng
+      become_user: true
       register: build_result
       changed_when: build_result.rc == 0
 
