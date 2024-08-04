@@ -136,7 +136,7 @@
         cd {{ repo_dir }}
         sudo -u hng nohup ./app > /var/log/stage_5b/out.log 2> /var/log/stage_5b/error.log &
       become: yes
-      become_user: hng
+      become_user: true
 
     - name: Install Nginx
       apt:
